@@ -41,20 +41,140 @@
 #include "fonts.h"
 #include "ssd1306.h"
 #include "nvs_flash.h"
+
+#include "wiring.h"
+#include "sccb.h"
+#include "twi.h"
+
 //#define BLINK_GPIO 4
-#define I2C_EXAMPLE_MASTER_SCL_IO    14    /*!< gpio number for I2C master clock */////////////
-#define I2C_EXAMPLE_MASTER_SDA_IO    13    /*!< gpio number for I2C master data  *//////////////
-#define I2C_EXAMPLE_MASTER_NUM I2C_NUM_1   /*!< I2C port number for master dev */
+#define I2C_EXAMPLE_MASTER_SCL_IO    		18    /*!< gpio number for I2C master clock */////////////
+#define I2C_EXAMPLE_MASTER_SDA_IO    		19    /*!< gpio number for I2C master data  *//////////////
+#define I2C_EXAMPLE_MASTER_NUM 				I2C_NUM_1   /*!< I2C port number for master dev */
 #define I2C_EXAMPLE_MASTER_TX_BUF_DISABLE   0   /*!< I2C master do not need buffer */
 #define I2C_EXAMPLE_MASTER_RX_BUF_DISABLE   0   /*!< I2C master do not need buffer */
-#define I2C_EXAMPLE_MASTER_FREQ_HZ    100000     /*!< I2C master clock frequency */
+#define I2C_EXAMPLE_MASTER_FREQ_HZ    		100000     /*!< I2C master clock frequency */
 
 const static char http_html_hdr[] = "HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n";
 
 const static char http_t[] = "<html><head><title>ESP32 PCM5102A webradio</title></head><body><h1>ESP32 PCM5102A webradio</h1><h2>Station list</h2><ul>";
 const static char http_e[] = "</ul><a href=\"P\">prev</a>&nbsp;<a href=\"N\">next</a></body></html>";
 
+//HN
+#define pinSCL		14
+#define pinSDA		13
+#define pinRST		33
+#define pinPDN		4
+#define pinSW		32
+#define pinLED		5
+//HN
+
+#define TAG "main"
+
+#define REG_CLOCK_CTRL		0x00
+#define REG_DEVICE_ID		0x01
+#define REG_ERROR_STATUS	0x02
+#define REG_SYS_CTRL_1		0x03
+#define REG_SDATA_INTERFACE	0x04
+#define REG_SYS_CTRL_2		0x05
+#define REG_SOFT_MUTE		0x06
+#define REG_MASTER_VOL		0x07
+#define REG_CHAN1_VOL		0x08
+#define REG_CHAN2_VOL		0x09
+#define REG_CHAN3_VOL		0x0A
+#define REG_VOL_CFG			0x0E
+#define REG_PWM_SHUTDOWN	0x19
+#define REG_OSC_TRIM		0x1B
+#define REG_INPUT_MUX		0x20
+#define REG_PWM_MUX			0x25
+#define REG_AGL_CTRL		0x46
+#define REG_BANK_SW_CTRL	0x50
+
+
+uint8_t i2cSlaveAddr  = 0xff;
+
 /* */
+static void config_tas5753(void) {
+   uint8_t regbuf[4];
+   
+   SCCB_Write(i2cSlaveAddr, REG_OSC_TRIM, 0x00); 
+   delay(500);
+   uint8_t osctrim = SCCB_Read(i2cSlaveAddr, REG_OSC_TRIM);
+   printf("\r\nTAS : Osc Trim = %02X\r\n", osctrim);   
+
+   SCCB_Write(i2cSlaveAddr, REG_SDATA_INTERFACE, 0x03); // i2s 16bit
+
+   SCCB_ReadBytes(i2cSlaveAddr, REG_BANK_SW_CTRL, regbuf, 4);
+   //printf("TAS : Bank Switch Control = %02X %02x %02x %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+
+   uint8_t bankswctrl[] = {REG_BANK_SW_CTRL, regbuf[0], regbuf[1], regbuf[2], regbuf[3] | 0x80}; // disable equalizer
+   SCCB_WriteBytes(i2cSlaveAddr, bankswctrl, 5);
+
+   SCCB_ReadBytes(i2cSlaveAddr, REG_BANK_SW_CTRL, regbuf, 4);
+   printf("TAS : Bank Switch Control = %02X %02X %02X %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   
+   uint8_t sdic = SCCB_Read(i2cSlaveAddr, REG_SDATA_INTERFACE);
+   printf("TAS : Serial Data Interface = %02X\r\n",sdic);   
+   uint8_t ccr = SCCB_Read(i2cSlaveAddr, REG_CLOCK_CTRL);
+   printf("TAS : Clock Control = %02X\r\n",ccr);   
+   
+   uint8_t pwmshdn = SCCB_Read(i2cSlaveAddr, REG_PWM_SHUTDOWN);
+   printf("TAS : PWM Shutdown Group = %02X\r\n", pwmshdn);   
+   uint8_t softmute = SCCB_Read(i2cSlaveAddr, REG_SOFT_MUTE);
+   printf("TAS : Soft Mute = %02X\r\n", softmute);   
+   
+   SCCB_ReadBytes(i2cSlaveAddr, REG_INPUT_MUX, regbuf, 4);
+   printf("TAS : Input Mux = %02X %02X %02X %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   
+   SCCB_ReadBytes(i2cSlaveAddr, REG_PWM_MUX, regbuf, 4);
+   printf("TAS : PWM Mux = %02X %02X %02X %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+      
+   // exit shutdown
+   SCCB_Write(i2cSlaveAddr, REG_SYS_CTRL_2, 0x00); 
+   delay(100);
+   uint8_t sysctrl2 = SCCB_Read(i2cSlaveAddr, REG_SYS_CTRL_2);
+   printf("TAS : System Control 2 = %02X\r\n", sysctrl2);   
+
+   uint8_t mastervol[] = {REG_MASTER_VOL, 0x01, 0x40};
+   SCCB_WriteBytes(i2cSlaveAddr, mastervol, 3); 
+
+
+   SCCB_ReadBytes(i2cSlaveAddr, REG_MASTER_VOL, regbuf, 2);
+   printf("TAS : Master Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+   //SCCB_ReadBytes(i2cSlaveAddr, REG_CHAN1_VOL, regbuf, 2);
+   //printf("TAS : Chan1 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+   //SCCB_ReadBytes(i2cSlaveAddr, REG_CHAN2_VOL, regbuf, 2);
+   //printf("TAS : Chan2 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+   //SCCB_ReadBytes(i2cSlaveAddr, REG_CHAN3_VOL, regbuf, 2);
+   //printf("TAS : Chan3 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+
+   SCCB_Write(i2cSlaveAddr, REG_ERROR_STATUS, 0x00); // clear errors
+   delay(100);
+   uint8_t errors = SCCB_Read(i2cSlaveAddr, REG_ERROR_STATUS);   
+   printf("TAS : Error Status = %02X\r\n\r\n",errors);
+}	
+
+static void reset_tas5753() {
+	pinMode(pinRST, OUTPUT);
+	digitalWrite(pinRST, 1);
+	pinMode(pinPDN, OUTPUT);
+	digitalWrite(pinPDN, 0);
+	printf("\r\nESP32 TAS5753 i2c compiled on %s at %s\r\n", __DATE__, __TIME__);
+	delay(100);
+	digitalWrite(pinSW, 1); // switch on PVDD
+	delay(100);
+
+	digitalWrite(pinPDN, 1);
+	delay(100);
+	digitalWrite(pinRST, 0);
+	delay(1); // min 0.1mS
+	digitalWrite(pinRST, 1);
+	delay(20); // min 13.5mS
+	SCCB_Init(pinSDA, pinSCL);
+	i2cSlaveAddr = SCCB_Probe();
+	printf("i2c addr 0x%02X\r\n", i2cSlaveAddr);
+	uint8_t devid = SCCB_Read(i2cSlaveAddr, 0x01);
+	printf("DEVICE ID = 0x%02X\r\n", devid); // should be 0x41
+	}
 
 #define NVSNAME "STATION"
 #define MAXURLLEN 128
@@ -206,17 +326,10 @@ static char ip[16];
 static int x = 0;
 static int l = 0;
 
-#ifdef CONFIG_SSD1306_6432
-#define XOFFSET 31
-#define YOFFSET 32
-#define WIDTH 64
-#define HEIGHT 32
-#else
 #define WIDTH 128
 #define HEIGHT 64
 #define XOFFSET 0
 #define YOFFSET 0
-#endif
 
 void oled_scroll(void) {
   if (surl == NULL) return;
@@ -226,15 +339,8 @@ void oled_scroll(void) {
   int w = strlen(surl) * 7;
   if (w <= WIDTH) return;
 
-#ifdef CONFIG_SSD1306_6432
-  SSD1306_GotoXY(XOFFSET - x, YOFFSET + 10);
-  SSD1306_Puts(surl, &Font_7x10, SSD1306_COLOR_WHITE);
-  SSD1306_GotoXY(XOFFSET - x, YOFFSET + 20);
-  SSD1306_Puts(ip, &Font_7x10, SSD1306_COLOR_WHITE);
-#else
   SSD1306_GotoXY(2 - x, 37);
   SSD1306_Puts(surl, &Font_7x10, SSD1306_COLOR_WHITE);
-#endif
 
   x++;
   if (x > w) x = -WIDTH;
@@ -248,23 +354,12 @@ void i2c_test(int mode)
     surl = url;
 
     SSD1306_Fill(SSD1306_COLOR_BLACK); // clear screen
-#ifdef CONFIG_SSD1306_6432
-    SSD1306_GotoXY(XOFFSET + 2, YOFFSET); // 31, 32);
-    SSD1306_Puts("ESP32PICO", &Font_7x10, SSD1306_COLOR_WHITE);
-    SSD1306_GotoXY(XOFFSET - x, YOFFSET + 10);
-    SSD1306_Puts(surl, &Font_7x10, SSD1306_COLOR_WHITE);
-    SSD1306_GotoXY(XOFFSET - x, YOFFSET + 20);
-    tcpip_adapter_ip_info_t ip_info;
-    tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &ip_info);
-    strcpy(ip, ip4addr_ntoa(&ip_info.ip));
-    SSD1306_Puts(ip + 3, &Font_7x10, SSD1306_COLOR_WHITE);
-#else
     SSD1306_GotoXY(40, 4);
     SSD1306_Puts("ESP32", &Font_11x18, SSD1306_COLOR_WHITE);
     
     SSD1306_GotoXY(2, 20);
 #ifdef CONFIG_BT_SPEAKER_MODE /////bluetooth speaker mode/////
-    SSD1306_Puts("PCM5102 BT speaker", &Font_7x10, SSD1306_COLOR_WHITE);
+    SSD1306_Puts("TAS5753 BT speaker", &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_GotoXY(2, 30);
     SSD1306_Puts("my device name is", &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_GotoXY(2, 39);
@@ -291,7 +386,6 @@ void i2c_test(int mode)
     SSD1306_Puts("IP:", &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_Puts(ip4addr_ntoa(&ip_info.ip), &Font_7x10, SSD1306_COLOR_WHITE);
 #endif
-#endif
     /* Update screen, send changes to LCD */
     SSD1306_UpdateScreen();
 
@@ -316,16 +410,7 @@ static void i2c_example_master_init()
                        I2C_EXAMPLE_MASTER_TX_BUF_DISABLE, 0);
 }
 
-/*
- void app_main()
- {
- print_mux = xSemaphoreCreateMutex();
- i2c_example_master_init();
- SSD1306_Init();
- 
- xTaskCreate(i2c_test, "i2c_test", 1024, NULL, 10, NULL);
- }
- */
+
 
 
 //////////////////////////////////////////////////////////////////
@@ -418,6 +503,14 @@ static void set_wifi_credentials()
 static void init_hardware()
 {
     nvs_flash_init();
+	reset_tas5753();	
+	pinMode(pinSW, OUTPUT);
+	digitalWrite(pinSW, 0);
+	pinMode(pinLED, OUTPUT);
+	digitalWrite(pinLED, 0);
+    i2c_example_master_init();
+    SSD1306_Init();
+    i2c_test(0);
 
     // init UI
     // ui_init(GPIO_NUM_32);
@@ -460,7 +553,9 @@ static renderer_config_t *create_renderer_config()
 {
     renderer_config_t *renderer_config = calloc(1, sizeof(renderer_config_t));
 
-    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
+//    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
+    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT; // HN (forces BCK = 64*fs required for TAS5753MD)
+	
     renderer_config->i2s_num = I2S_NUM_0;
     renderer_config->sample_rate = 44100;
     renderer_config->sample_rate_modifier = 1.0;
@@ -654,16 +749,10 @@ void app_main()
     bt_speaker_start(create_renderer_config());
 #else
     start_wifi();
-    i2c_example_master_init();
-    SSD1306_Init();
-    i2c_test(1);
-
     start_web_radio();
-
-    i2c_test(0);
 #endif
     ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
-
+    config_tas5753();
     // ESP_LOGI(TAG, "app_main stack: %d\n", uxTaskGetStackHighWaterMark(NULL));
     while (1) {
       vTaskDelay(40/portTICK_RATE_MS);
