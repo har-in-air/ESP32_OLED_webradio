@@ -1,6 +1,6 @@
 
 Modified for use with TAS5753MD digital i2s audio amplifier
-Wiring pinout is now
+Currently bitbanging i2c interface to TAS5753MD, need to merge with xi2c interface already being used for SSD1306 OLED 
 
 
 
