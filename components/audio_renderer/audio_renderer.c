@@ -50,9 +50,9 @@ static void init_i2s(renderer_config_t *config)
     };
 
     i2s_pin_config_t pin_config = {
-            .bck_io_num = 26,
+            .bck_io_num = 27,
             .ws_io_num = 25,
-            .data_out_num = 22,
+            .data_out_num = 26,
             .data_in_num = I2S_PIN_NO_CHANGE    // Not used
     };
 
