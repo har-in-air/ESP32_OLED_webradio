@@ -1,4 +1,9 @@
 
+Modified for use with TAS5753MD digital i2s audio amplifier
+Wiring pinout is now
+
+
+
 Modified for multi URL support by n24bass
 (merged several new functions, URL scrolling!)
 
