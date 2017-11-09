@@ -79,8 +79,8 @@ CONFIG_MONITOR_BAUD=115200
 #
 # Wifi Configuration
 #
-CONFIG_WIFI_SSID="Airtel"
-CONFIG_WIFI_PASSWORD="UGIU43uhdjlkujYHYfgt3r8  "
+CONFIG_WIFI_SSID="myssid"
+CONFIG_WIFI_PASSWORD="xxyyzz12"
 
 #
 # Audio Output
