@@ -2,7 +2,12 @@
 Modified for use with TAS5753MD digital i2s audio amplifier
 Currently bitbanging i2c interface to TAS5753MD, need to merge with xi2c interface already being used for SSD1306 OLED 
 
+change i2s pin interface
+now  bck_io_num = 27, ws_io_num = 25, data_out_num = 26,
+The  TAS5753MD needs a bck of at least 64*fs so that mclk can be tied to bck. Otherwise we also have to supply mclk.
+Original code generates bck = 32*fs. Now we generate bitclk = 64*fs by setting samplebits to 32 even though its  not a merus board.  With 64*fs, the 16bit samples are just left justified in the 32bit sample sent out, which is no problem,  we configure the TAS5753MD for this data format.
 
+-------------------------------------------
 
 Modified for multi URL support by n24bass
 (merged several new functions, URL scrolling!)
