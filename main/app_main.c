@@ -1,18 +1,12 @@
+#include "common.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
-#include <nvs.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_system.h"
 #include "esp_wifi.h"
-#include "esp_event_loop.h"
-#include "esp_log.h"
-#include "nvs_flash.h"
 #include "http.h"
+#include "bt_config.h"
+#include "soc/gpio_reg.h"
+#include "soc/io_mux_reg.h"
+#include "driver/gpio.h"
+#include "driver/i2c.h"
 #include "driver/i2s.h"
 
 #include "lwip/sys.h"
@@ -31,150 +25,175 @@
 #include "bt_speaker.h"
 #endif
 
-/////////////////////////////////////////////////////
-///////////////////////////
-#include "bt_config.h"
-#include "driver/gpio.h"
-#include "driver/i2c.h"
-//#include "esp_wifi.h"
 #include "xi2c.h"
+#include "myi2c.h"
 #include "fonts.h"
 #include "ssd1306.h"
-#include "nvs_flash.h"
 
-#include "wiring.h"
-#include "sccb.h"
-#include "twi.h"
 
 //#define BLINK_GPIO 4
-#define I2C_EXAMPLE_MASTER_SCL_IO    		18    /*!< gpio number for I2C master clock */////////////
-#define I2C_EXAMPLE_MASTER_SDA_IO    		19    /*!< gpio number for I2C master data  *//////////////
-#define I2C_EXAMPLE_MASTER_NUM 				I2C_NUM_1   /*!< I2C port number for master dev */
-#define I2C_EXAMPLE_MASTER_TX_BUF_DISABLE   0   /*!< I2C master do not need buffer */
-#define I2C_EXAMPLE_MASTER_RX_BUF_DISABLE   0   /*!< I2C master do not need buffer */
-#define I2C_EXAMPLE_MASTER_FREQ_HZ    		100000     /*!< I2C master clock frequency */
+#define I2C_MASTER_SCL_IO    		14
+#define I2C_MASTER_SDA_IO    		13
+#define I2C_MASTER_NUM 				I2C_NUM_1   
+#define I2C_MASTER_TX_BUF_DISABLE   0   
+#define I2C_MASTER_RX_BUF_DISABLE   0   
+#define I2C_MASTER_FREQ_HZ    		100000 
 
-const static char http_html_hdr[] = "HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n";
-
-const static char http_t[] = "<html><head><title>ESP32 PCM5102A webradio</title></head><body><h1>ESP32 PCM5102A webradio</h1><h2>Station list</h2><ul>";
-const static char http_e[] = "</ul><a href=\"P\">prev</a>&nbsp;<a href=\"N\">next</a></body></html>";
 
 //HN
-#define pinSCL		14
-#define pinSDA		13
 #define pinRST		33
 #define pinPDN		4
 #define pinSW		32
 #define pinLED		5
+
+
+#define TAS5753MD_REG_CLOCK_CTRL		0x00
+#define TAS5753MD_REG_DEVICE_ID			0x01
+#define TAS5753MD_REG_ERROR_STATUS		0x02
+#define TAS5753MD_REG_SYS_CTRL_1		0x03
+#define TAS5753MD_REG_SDATA_INTERFACE	0x04
+#define TAS5753MD_REG_SYS_CTRL_2		0x05
+#define TAS5753MD_REG_SOFT_MUTE			0x06
+#define TAS5753MD_REG_MASTER_VOL		0x07
+#define TAS5753MD_REG_CHAN1_VOL			0x08
+#define TAS5753MD_REG_CHAN2_VOL			0x09
+#define TAS5753MD_REG_CHAN3_VOL			0x0A
+#define TAS5753MD_REG_VOL_CFG			0x0E
+#define TAS5753MD_REG_PWM_SHUTDOWN		0x19
+#define TAS5753MD_REG_OSC_TRIM			0x1B
+#define TAS5753MD_REG_INPUT_MUX			0x20
+#define TAS5753MD_REG_PWM_MUX			0x25
+#define TAS5753MD_REG_AGL_CTRL			0x46
+#define TAS5753MD_REG_BANK_SW_CTRL		0x50
+
 //HN
 
 #define TAG "main"
 
-#define REG_CLOCK_CTRL		0x00
-#define REG_DEVICE_ID		0x01
-#define REG_ERROR_STATUS	0x02
-#define REG_SYS_CTRL_1		0x03
-#define REG_SDATA_INTERFACE	0x04
-#define REG_SYS_CTRL_2		0x05
-#define REG_SOFT_MUTE		0x06
-#define REG_MASTER_VOL		0x07
-#define REG_CHAN1_VOL		0x08
-#define REG_CHAN2_VOL		0x09
-#define REG_CHAN3_VOL		0x0A
-#define REG_VOL_CFG			0x0E
-#define REG_PWM_SHUTDOWN	0x19
-#define REG_OSC_TRIM		0x1B
-#define REG_INPUT_MUX		0x20
-#define REG_PWM_MUX			0x25
-#define REG_AGL_CTRL		0x46
-#define REG_BANK_SW_CTRL	0x50
+#define TAS5753MD_I2C_ADDR  ((uint8_t)0x2A)
 
+#define OUTPUT 			0
+#define INPUT 			1
+#define INPUT_PULLUP 	2
 
-uint8_t i2cSlaveAddr  = 0xff;
+static void pinMode(int pin, int mode) {
+    gpio_config_t conf = {0};
+    conf.pin_bit_mask = 1LL << pin;
+	if (mode == OUTPUT) {
+		conf.mode = GPIO_MODE_OUTPUT;
+		}
+	if (mode == INPUT || mode == INPUT_PULLUP) {
+	    conf.mode = GPIO_MODE_INPUT;
+		}
+	if (mode == INPUT) {
+	    conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+	    conf.pull_up_en = GPIO_PULLUP_DISABLE;
+		}
+	else if (mode == INPUT_PULLUP) {
+        conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        conf.pull_up_en = GPIO_PULLUP_ENABLE;
+		}
+	gpio_config(&conf);
+	}
 
-/* */
 static void config_tas5753(void) {
    uint8_t regbuf[4];
+   uint8_t regRead;
    
-   SCCB_Write(i2cSlaveAddr, REG_OSC_TRIM, 0x00); 
-   delay(500);
-   uint8_t osctrim = SCCB_Read(i2cSlaveAddr, REG_OSC_TRIM);
-   printf("\r\nTAS : Osc Trim = %02X\r\n", osctrim);   
+   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_OSC_TRIM, 0x00); 
+   delayMs(500);
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_OSC_TRIM, &regRead);
+   ESP_LOGI(TAG,"TAS : Osc Trim = %02X", regRead);   
 
-   SCCB_Write(i2cSlaveAddr, REG_SDATA_INTERFACE, 0x03); // i2s 16bit
+   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SDATA_INTERFACE, 0x03); // i2s 16bit
 
-   SCCB_ReadBytes(i2cSlaveAddr, REG_BANK_SW_CTRL, regbuf, 4);
-   //printf("TAS : Bank Switch Control = %02X %02x %02x %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_BANK_SW_CTRL, regbuf, 4);
+   //ESP_LOGI(TAG,"TAS : Bank Switch Control = %02X %02x %02x %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
 
-   uint8_t bankswctrl[] = {REG_BANK_SW_CTRL, regbuf[0], regbuf[1], regbuf[2], regbuf[3] | 0x80}; // disable equalizer
-   SCCB_WriteBytes(i2cSlaveAddr, bankswctrl, 5);
+   uint8_t bankswctrl[] = {TAS5753MD_REG_BANK_SW_CTRL, regbuf[0], regbuf[1], regbuf[2], regbuf[3] | 0x80}; // disable equalizer
+   i2c_WriteBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, bankswctrl, 5);
 
-   SCCB_ReadBytes(i2cSlaveAddr, REG_BANK_SW_CTRL, regbuf, 4);
-   printf("TAS : Bank Switch Control = %02X %02X %02X %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_BANK_SW_CTRL, regbuf, 4);
+   ESP_LOGI(TAG,"TAS : Bank Switch Control = %02X %02X %02X %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
    
-   uint8_t sdic = SCCB_Read(i2cSlaveAddr, REG_SDATA_INTERFACE);
-   printf("TAS : Serial Data Interface = %02X\r\n",sdic);   
-   uint8_t ccr = SCCB_Read(i2cSlaveAddr, REG_CLOCK_CTRL);
-   printf("TAS : Clock Control = %02X\r\n",ccr);   
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SDATA_INTERFACE, &regRead);
+   ESP_LOGI(TAG,"TAS : Serial Data Interface = %02X", regRead);   
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CLOCK_CTRL, &regRead);
+   ESP_LOGI(TAG,"TAS : Clock Control = %02X", regRead);   
    
-   uint8_t pwmshdn = SCCB_Read(i2cSlaveAddr, REG_PWM_SHUTDOWN);
-   printf("TAS : PWM Shutdown Group = %02X\r\n", pwmshdn);   
-   uint8_t softmute = SCCB_Read(i2cSlaveAddr, REG_SOFT_MUTE);
-   printf("TAS : Soft Mute = %02X\r\n", softmute);   
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_PWM_SHUTDOWN, &regRead);
+   ESP_LOGI(TAG,"TAS : PWM Shutdown Group = %02X", regRead);   
    
-   SCCB_ReadBytes(i2cSlaveAddr, REG_INPUT_MUX, regbuf, 4);
-   printf("TAS : Input Mux = %02X %02X %02X %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SOFT_MUTE, &regRead);
+   ESP_LOGI(TAG,"TAS : Soft Mute = %02X", regRead);   
    
-   SCCB_ReadBytes(i2cSlaveAddr, REG_PWM_MUX, regbuf, 4);
-   printf("TAS : PWM Mux = %02X %02X %02X %02X\r\n", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_INPUT_MUX, regbuf, 4);
+   ESP_LOGI(TAG,"TAS : Input Mux = %02X %02X %02X %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
+   
+   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_PWM_MUX, regbuf, 4);
+   ESP_LOGI(TAG,"TAS : PWM Mux = %02X %02X %02X %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
       
    // exit shutdown
-   SCCB_Write(i2cSlaveAddr, REG_SYS_CTRL_2, 0x00); 
-   delay(100);
-   uint8_t sysctrl2 = SCCB_Read(i2cSlaveAddr, REG_SYS_CTRL_2);
-   printf("TAS : System Control 2 = %02X\r\n", sysctrl2);   
+   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SYS_CTRL_2, 0x00); 
+   delayMs(100);
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SYS_CTRL_2, &regRead);
+   ESP_LOGI(TAG,"TAS : System Control 2 = %02X", regRead);   
 
-   uint8_t mastervol[] = {REG_MASTER_VOL, 0x01, 0x40};
-   SCCB_WriteBytes(i2cSlaveAddr, mastervol, 3); 
+   uint8_t mastervol[] = {TAS5753MD_REG_MASTER_VOL, 0x01, 0x40};
+   i2c_WriteBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, mastervol, 3); 
 
 
-   SCCB_ReadBytes(i2cSlaveAddr, REG_MASTER_VOL, regbuf, 2);
-   printf("TAS : Master Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
-   //SCCB_ReadBytes(i2cSlaveAddr, REG_CHAN1_VOL, regbuf, 2);
-   //printf("TAS : Chan1 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
-   //SCCB_ReadBytes(i2cSlaveAddr, REG_CHAN2_VOL, regbuf, 2);
-   //printf("TAS : Chan2 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
-   //SCCB_ReadBytes(i2cSlaveAddr, REG_CHAN3_VOL, regbuf, 2);
-   //printf("TAS : Chan3 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_MASTER_VOL, regbuf, 2);
+   ESP_LOGI(TAG, "TAS : Master Vol = %02X %02X", regbuf[0],regbuf[1] );   
+   //i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CHAN1_VOL, regbuf, 2);
+   //ESP_LOGI(TAG,"TAS : Chan1 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+   //i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CHAN2_VOL, regbuf, 2);
+   //ESP_LOGI(TAG,"TAS : Chan2 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
+   //i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CHAN3_VOL, regbuf, 2);
+   //ESP_LOGI(TAG,"TAS : Chan3 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
 
-   SCCB_Write(i2cSlaveAddr, REG_ERROR_STATUS, 0x00); // clear errors
-   delay(100);
-   uint8_t errors = SCCB_Read(i2cSlaveAddr, REG_ERROR_STATUS);   
-   printf("TAS : Error Status = %02X\r\n\r\n",errors);
-}	
-
-static void reset_tas5753() {
-	pinMode(pinRST, OUTPUT);
-	digitalWrite(pinRST, 1);
-	pinMode(pinPDN, OUTPUT);
-	digitalWrite(pinPDN, 0);
-	printf("\r\nESP32 TAS5753 i2c compiled on %s at %s\r\n", __DATE__, __TIME__);
-	delay(100);
-	digitalWrite(pinSW, 1); // switch on PVDD
-	delay(100);
-
-	digitalWrite(pinPDN, 1);
-	delay(100);
-	digitalWrite(pinRST, 0);
-	delay(1); // min 0.1mS
-	digitalWrite(pinRST, 1);
-	delay(20); // min 13.5mS
-	SCCB_Init(pinSDA, pinSCL);
-	i2cSlaveAddr = SCCB_Probe();
-	printf("i2c addr 0x%02X\r\n", i2cSlaveAddr);
-	uint8_t devid = SCCB_Read(i2cSlaveAddr, 0x01);
-	printf("DEVICE ID = 0x%02X\r\n", devid); // should be 0x41
+   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_ERROR_STATUS, 0x00); // clear errors
+   delayMs(100);
+   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_ERROR_STATUS, &regRead);   
+   ESP_LOGI(TAG, "TAS : Error Status = %02X",regRead);
 	}
+	
+
+
+static esp_err_t reset_tas5753(void) {
+	pinMode(pinSW, OUTPUT);
+	gpio_set_level(pinSW, 0);
+	pinMode(pinRST, OUTPUT);
+	gpio_set_level(pinRST, 1);
+	pinMode(pinPDN, OUTPUT);
+	gpio_set_level(pinPDN, 0);
+	delayMs(100);
+	gpio_set_level(pinSW, 1); // switch on PVDD
+	delayMs(100);
+
+	gpio_set_level(pinPDN, 1);
+	delayMs(100);
+	gpio_set_level(pinRST, 0);
+	delayMs(1); // min 0.1mS
+	gpio_set_level(pinRST, 1);
+	delayMs(20); // min 13.5mS
+	
+	uint8_t deviceID;	
+    esp_err_t ret =	i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, 0x01, &deviceID);
+	if (ret == ESP_FAIL) {
+		ESP_LOGE(TAG,"i2cread tas5753md failed");
+		}
+	else {
+		ESP_LOGE(TAG,"TAS5753MD DEVICE ID [expected 0x41] = 0x%02X", deviceID); 
+		}
+	return ret;
+	}
+	
+	
+const static char http_html_hdr[] = "HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n";
+const static char http_t[] = "<html><head><title>ESP32 TAS5753MD webradio</title></head><body><h1>ESP32 TAS5753MD webradio</h1><h2>Station list</h2><ul>";
+const static char http_e[] = "</ul><a href=\"P\">prev</a>&nbsp;<a href=\"N\">next</a></body></html>";
+	
 
 #define NVSNAME "STATION"
 #define MAXURLLEN 128
@@ -317,12 +336,15 @@ void erase_nvurl(int n) {
   nvs_close(h);
 }
 
-/* */
+
 
 xSemaphoreHandle print_mux;
 
 static char *surl = NULL;
+#ifndef CONFIG_BT_SPEAKER_MODE
 static char ip[16];
+#endif
+
 static int x = 0;
 static int l = 0;
 
@@ -347,8 +369,7 @@ void oled_scroll(void) {
   SSD1306_UpdateScreen();
 }
 
-void i2c_test(int mode)
-{
+void i2c_test(int mode){
     char *url = get_url(); // play_url();
     x = 0;
     surl = url;
@@ -358,7 +379,7 @@ void i2c_test(int mode)
     SSD1306_Puts("ESP32", &Font_11x18, SSD1306_COLOR_WHITE);
     
     SSD1306_GotoXY(2, 20);
-#ifdef CONFIG_BT_SPEAKER_MODE /////bluetooth speaker mode/////
+#ifdef CONFIG_BT_SPEAKER_MODE
     SSD1306_Puts("TAS5753 BT speaker", &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_GotoXY(2, 30);
     SSD1306_Puts("my device name is", &Font_7x10, SSD1306_COLOR_WHITE);
@@ -366,8 +387,8 @@ void i2c_test(int mode)
     SSD1306_Puts(dev_name, &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_GotoXY(16, 53);
     SSD1306_Puts("Yeah! Speaker!", &Font_7x10, SSD1306_COLOR_WHITE);
-#else ////////for webradio mode display////////////////
-    SSD1306_Puts("PCM5102A webradio", &Font_7x10, SSD1306_COLOR_WHITE);
+#else 
+    SSD1306_Puts("TAS5753 web radio", &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_GotoXY(2, 30);
     if (mode) {
       SSD1306_Puts("web server is up.", &Font_7x10, SSD1306_COLOR_WHITE);
@@ -386,29 +407,23 @@ void i2c_test(int mode)
     SSD1306_Puts("IP:", &Font_7x10, SSD1306_COLOR_WHITE);
     SSD1306_Puts(ip4addr_ntoa(&ip_info.ip), &Font_7x10, SSD1306_COLOR_WHITE);
 #endif
-    /* Update screen, send changes to LCD */
     SSD1306_UpdateScreen();
+	}
 
-}
-
-/**
- * @brief i2c master initialization
- */
-static void i2c_example_master_init()
-{
-    int i2c_master_port = I2C_EXAMPLE_MASTER_NUM;
+static void i2c_master_init(void){
+    int i2c_master_port = I2C_MASTER_NUM;
     i2c_config_t conf;
     conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_EXAMPLE_MASTER_SDA_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_io_num = I2C_EXAMPLE_MASTER_SCL_IO;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = I2C_EXAMPLE_MASTER_FREQ_HZ;
+    conf.sda_io_num = I2C_MASTER_SDA_IO;
+    conf.sda_pullup_en = GPIO_PULLUP_DISABLE; // external pullups
+    conf.scl_io_num = I2C_MASTER_SCL_IO;
+    conf.scl_pullup_en = GPIO_PULLUP_DISABLE;
+    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
     i2c_param_config(i2c_master_port, &conf);
     i2c_driver_install(i2c_master_port, conf.mode,
-                       I2C_EXAMPLE_MASTER_RX_BUF_DISABLE,
-                       I2C_EXAMPLE_MASTER_TX_BUF_DISABLE, 0);
-}
+                       I2C_MASTER_RX_BUF_DISABLE,
+                       I2C_MASTER_TX_BUF_DISABLE, 0);
+	}
 
 
 
@@ -418,7 +433,6 @@ static void i2c_example_master_init()
 
 #define WIFI_LIST_NUM   10
 
-#define TAG "main"
 
 
 //Priorities of the reader and the decoder thread. bigger number = higher prio
@@ -426,7 +440,7 @@ static void i2c_example_master_init()
 #define PRIO_MQTT configMAX_PRIORITIES - 3
 #define PRIO_CONNECT configMAX_PRIORITIES -1
 
-
+#ifndef CONFIG_BT_SPEAKER_MODE
 
 /* event handler for pre-defined wifi events */
 static esp_err_t event_handler(void *ctx, system_event_t *event)
@@ -500,33 +514,8 @@ static void set_wifi_credentials()
     esp_wifi_connect();
 }
 
-static void init_hardware()
-{
-    nvs_flash_init();
-	reset_tas5753();	
-	pinMode(pinSW, OUTPUT);
-	digitalWrite(pinSW, 0);
-	pinMode(pinLED, OUTPUT);
-	digitalWrite(pinLED, 0);
-    i2c_example_master_init();
-    SSD1306_Init();
-    i2c_test(0);
 
-    // init UI
-    // ui_init(GPIO_NUM_32);
-
-    //Initialize the SPI RAM chip communications and see if it actually retains some bytes. If it
-    //doesn't, warn user.
-    if (!spiRamFifoInit()) {
-        printf("\n\nSPI RAM chip fail!\n");
-        while(1);
-    }
-
-    ESP_LOGI(TAG, "hardware initialized");
-}
-
-static void start_wifi()
-{
+static void start_wifi(void) {
     ESP_LOGI(TAG, "starting network");
 
     /* FreeRTOS event group to signal when we are connected & ready to make a request */
@@ -545,37 +534,12 @@ static void start_wifi()
                         false, true, portMAX_DELAY);
 
     ui_queue_event(UI_CONNECTED);
-}
+	}
 
-static void http_server(void *pvParameters);
-
-static renderer_config_t *create_renderer_config()
-{
-    renderer_config_t *renderer_config = calloc(1, sizeof(renderer_config_t));
-
-//    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
-    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT; // HN (forces BCK = 64*fs required for TAS5753MD)
-	
-    renderer_config->i2s_num = I2S_NUM_0;
-    renderer_config->sample_rate = 44100;
-    renderer_config->sample_rate_modifier = 1.0;
-    renderer_config->output_mode = AUDIO_OUTPUT_MODE;
-
-    if(renderer_config->output_mode == I2S_MERUS) {
-        renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT;
-    }
-
-    if(renderer_config->output_mode == DAC_BUILT_IN) {
-        renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
-    }
-
-    return renderer_config;
-}
 
 web_radio_t *radio_config = NULL;
 
-static void start_web_radio()
-{
+static void start_web_radio(void) {
     printf("start_web_radio\n");
 
     init_url(0); // init_station(0);
@@ -609,13 +573,40 @@ static void start_web_radio()
     web_radio_start(radio_config);
 }
 
+#endif
+	
+	
+static void http_server(void *pvParameters);
+
+static renderer_config_t *create_renderer_config(void){
+    renderer_config_t *renderer_config = calloc(1, sizeof(renderer_config_t));
+
+//    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
+    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT; // HN (forces BCK = 64*fs required for TAS5753MD)
+	
+    renderer_config->i2s_num = I2S_NUM_0;
+    renderer_config->sample_rate = 44100;
+    renderer_config->sample_rate_modifier = 1.0;
+    renderer_config->output_mode = AUDIO_OUTPUT_MODE;
+
+    if(renderer_config->output_mode == I2S_MERUS) {
+        renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT;
+    }
+
+    if(renderer_config->output_mode == DAC_BUILT_IN) {
+        renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
+    }
+
+    return renderer_config;
+}
+
+
 /*
    web interface
  */
 
 static void
-http_server_netconn_serve(struct netconn *conn)
-{
+http_server_netconn_serve(struct netconn *conn) {
   struct netbuf *inbuf;
   char *buf;
   u16_t buflen;
@@ -715,8 +706,7 @@ http_server_netconn_serve(struct netconn *conn)
   }
 }
 
-static void http_server(void *pvParameters)
-{
+static void http_server(void *pvParameters){
   struct netconn *conn, *newconn;
   err_t err;
   conn = netconn_new(NETCONN_TCP);
@@ -733,14 +723,32 @@ static void http_server(void *pvParameters)
    netconn_delete(conn);
 }
 
+static void init_hardware(){
+    nvs_flash_init();
+    i2c_master_init();
+	if (reset_tas5753() == ESP_FAIL) {
+		ESP_LOGE(TAG, "cannot initialize TAS5753MD, loop forever");
+		while (1) {
+			delayMs(100);
+			}
+		}
+    config_tas5753();
+    SSD1306_Init();
+    i2c_test(0);
 
-/**
- * entry point
- */
-void app_main()
-{
+    if (!spiRamFifoInit()) {
+		ESP_LOGE(TAG,"SPI RAM fail!");
+        while(1);
+		}
+
+    ESP_LOGI(TAG, "hardware initialized");
+	}
+
+
+
+void app_main(){
     print_mux = xSemaphoreCreateMutex();
-    ESP_LOGI(TAG, "starting app_main()");
+    ESP_LOGI(TAG,"ESP32 TAS5753 OLED Webradio compiled on %s at %s", __DATE__, __TIME__);
     ESP_LOGI(TAG, "RAM left: %u", esp_get_free_heap_size());
 
     init_hardware();
@@ -752,7 +760,6 @@ void app_main()
     start_web_radio();
 #endif
     ESP_LOGI(TAG, "RAM left %d", esp_get_free_heap_size());
-    config_tas5753();
     // ESP_LOGI(TAG, "app_main stack: %d\n", uxTaskGetStackHighWaterMark(NULL));
     while (1) {
       vTaskDelay(40/portTICK_RATE_MS);
@@ -763,7 +770,7 @@ void app_main()
 
     
 #ifndef CONFIG_BT_SPEAKER_MODE // Y.H.Cha : Add this to run in Web radio mode only
-xTaskCreate(&http_server, "http_server", 2048, NULL, 5, NULL);
+	xTaskCreate(&http_server, "http_server", 2048, NULL, 5, NULL);
 #endif
-
-}
+	}
+	
