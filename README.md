@@ -7,7 +7,7 @@ i2c interface pinout : SCL = 14, SDA = 13. Common interface for SSD1306 and TAS5
 
 The  TAS5753MD needs a bit clock bck of at least 64*fs so that mclk can be tied to bck. Otherwise we also have to supply mclk.
 
-Original code generates bck = 32*fs. Now we generate bitclk = 64*fs by setting samplebits to 32 even though its  not a merus board.  With 64*fs, the 16bit samples are left justified in the 32bit sample sent out. We configure the TAS5753MD for this data format.
+Original code generates bck = 32 * fs. Now we generate bitclk = 64 * fs by setting samplebitwidth to 32.  With 64 * fs, the 16bit samples are left justified in the 32bit sample sent out. We configure the TAS5753MD for this data format.
 
 Bluetooth device name changed back to "ESP_SPEAKER"
 
