@@ -9,6 +9,8 @@ The  TAS5753MD needs a bit clock bck of at least 64*fs so that mclk can be tied 
 
 Original code generates bck = 32*fs. Now we generate bitclk = 64*fs by setting samplebits to 32 even though its  not a merus board.  With 64*fs, the 16bit samples are left justified in the 32bit sample sent out. We configure the TAS5753MD for this data format.
 
+Bluetooth device name changed back to "ESP_SPEAKER"
+
 -------------------------------------------
 
 Modified for multi URL support by n24bass
