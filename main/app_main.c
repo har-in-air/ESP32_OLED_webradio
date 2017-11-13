@@ -1,11 +1,7 @@
 #include "common.h"
-
 #include "esp_wifi.h"
 #include "http.h"
 #include "bt_config.h"
-#include "soc/gpio_reg.h"
-#include "soc/io_mux_reg.h"
-#include "driver/gpio.h"
 #include "driver/i2c.h"
 #include "driver/i2s.h"
 
@@ -29,166 +25,12 @@
 #include "myi2c.h"
 #include "fonts.h"
 #include "ssd1306.h"
+#include "pinmode.h"
+#include "tas5753md.h"
+#include "config.h"
 
-
-//#define BLINK_GPIO 4
-#define I2C_MASTER_SCL_IO    		14
-#define I2C_MASTER_SDA_IO    		13
-#define I2C_MASTER_NUM 				I2C_NUM_1   
-#define I2C_MASTER_TX_BUF_DISABLE   0   
-#define I2C_MASTER_RX_BUF_DISABLE   0   
-#define I2C_MASTER_FREQ_HZ    		100000 
-
-
-//HN
-#define pinRST		33
-#define pinPDN		4
-#define pinSW		32
-#define pinLED		5
-
-
-#define TAS5753MD_REG_CLOCK_CTRL		0x00
-#define TAS5753MD_REG_DEVICE_ID			0x01
-#define TAS5753MD_REG_ERROR_STATUS		0x02
-#define TAS5753MD_REG_SYS_CTRL_1		0x03
-#define TAS5753MD_REG_SDATA_INTERFACE	0x04
-#define TAS5753MD_REG_SYS_CTRL_2		0x05
-#define TAS5753MD_REG_SOFT_MUTE			0x06
-#define TAS5753MD_REG_MASTER_VOL		0x07
-#define TAS5753MD_REG_CHAN1_VOL			0x08
-#define TAS5753MD_REG_CHAN2_VOL			0x09
-#define TAS5753MD_REG_CHAN3_VOL			0x0A
-#define TAS5753MD_REG_VOL_CFG			0x0E
-#define TAS5753MD_REG_PWM_SHUTDOWN		0x19
-#define TAS5753MD_REG_OSC_TRIM			0x1B
-#define TAS5753MD_REG_INPUT_MUX			0x20
-#define TAS5753MD_REG_PWM_MUX			0x25
-#define TAS5753MD_REG_AGL_CTRL			0x46
-#define TAS5753MD_REG_BANK_SW_CTRL		0x50
-
-//HN
 
 #define TAG "main"
-
-#define TAS5753MD_I2C_ADDR  ((uint8_t)0x2A)
-
-#define OUTPUT 			0
-#define INPUT 			1
-#define INPUT_PULLUP 	2
-
-static void pinMode(int pin, int mode) {
-    gpio_config_t conf = {0};
-    conf.pin_bit_mask = 1LL << pin;
-	if (mode == OUTPUT) {
-		conf.mode = GPIO_MODE_OUTPUT;
-		}
-	if (mode == INPUT || mode == INPUT_PULLUP) {
-	    conf.mode = GPIO_MODE_INPUT;
-		}
-	if (mode == INPUT) {
-	    conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-	    conf.pull_up_en = GPIO_PULLUP_DISABLE;
-		}
-	else if (mode == INPUT_PULLUP) {
-        conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        conf.pull_up_en = GPIO_PULLUP_ENABLE;
-		}
-	gpio_config(&conf);
-	}
-
-static void config_tas5753(void) {
-   uint8_t regbuf[4];
-   uint8_t regRead;
-   
-   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_OSC_TRIM, 0x00); 
-   delayMs(500);
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_OSC_TRIM, &regRead);
-   ESP_LOGI(TAG,"TAS : Osc Trim = %02X", regRead);   
-
-   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SDATA_INTERFACE, 0x03); // i2s 16bit
-
-   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_BANK_SW_CTRL, regbuf, 4);
-   //ESP_LOGI(TAG,"TAS : Bank Switch Control = %02X %02x %02x %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
-
-   uint8_t bankswctrl[] = {TAS5753MD_REG_BANK_SW_CTRL, regbuf[0], regbuf[1], regbuf[2], regbuf[3] | 0x80}; // disable equalizer
-   i2c_WriteBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, bankswctrl, 5);
-
-   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_BANK_SW_CTRL, regbuf, 4);
-   ESP_LOGI(TAG,"TAS : Bank Switch Control = %02X %02X %02X %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
-   
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SDATA_INTERFACE, &regRead);
-   ESP_LOGI(TAG,"TAS : Serial Data Interface = %02X", regRead);   
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CLOCK_CTRL, &regRead);
-   ESP_LOGI(TAG,"TAS : Clock Control = %02X", regRead);   
-   
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_PWM_SHUTDOWN, &regRead);
-   ESP_LOGI(TAG,"TAS : PWM Shutdown Group = %02X", regRead);   
-   
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SOFT_MUTE, &regRead);
-   ESP_LOGI(TAG,"TAS : Soft Mute = %02X", regRead);   
-   
-   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_INPUT_MUX, regbuf, 4);
-   ESP_LOGI(TAG,"TAS : Input Mux = %02X %02X %02X %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
-   
-   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_PWM_MUX, regbuf, 4);
-   ESP_LOGI(TAG,"TAS : PWM Mux = %02X %02X %02X %02X", regbuf[0],regbuf[1],regbuf[2],regbuf[3] );   
-      
-   // exit shutdown
-   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SYS_CTRL_2, 0x00); 
-   delayMs(100);
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_SYS_CTRL_2, &regRead);
-   ESP_LOGI(TAG,"TAS : System Control 2 = %02X", regRead);   
-
-   uint8_t mastervol[] = {TAS5753MD_REG_MASTER_VOL, 0x01, 0x40};
-   i2c_WriteBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, mastervol, 3); 
-
-
-   i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_MASTER_VOL, regbuf, 2);
-   ESP_LOGI(TAG, "TAS : Master Vol = %02X %02X", regbuf[0],regbuf[1] );   
-   //i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CHAN1_VOL, regbuf, 2);
-   //ESP_LOGI(TAG,"TAS : Chan1 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
-   //i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CHAN2_VOL, regbuf, 2);
-   //ESP_LOGI(TAG,"TAS : Chan2 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
-   //i2c_ReadBuffer(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_CHAN3_VOL, regbuf, 2);
-   //ESP_LOGI(TAG,"TAS : Chan3 Vol = %02X %02X\r\n", regbuf[0],regbuf[1] );   
-
-   i2c_WriteRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_ERROR_STATUS, 0x00); // clear errors
-   delayMs(100);
-   i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, TAS5753MD_REG_ERROR_STATUS, &regRead);   
-   ESP_LOGI(TAG, "TAS : Error Status = %02X",regRead);
-	}
-	
-
-
-static esp_err_t reset_tas5753(void) {
-	pinMode(pinSW, OUTPUT);
-	gpio_set_level(pinSW, 0);
-	pinMode(pinRST, OUTPUT);
-	gpio_set_level(pinRST, 1);
-	pinMode(pinPDN, OUTPUT);
-	gpio_set_level(pinPDN, 0);
-	delayMs(100);
-	gpio_set_level(pinSW, 1); // switch on PVDD
-	delayMs(100);
-
-	gpio_set_level(pinPDN, 1);
-	delayMs(100);
-	gpio_set_level(pinRST, 0);
-	delayMs(1); // min 0.1mS
-	gpio_set_level(pinRST, 1);
-	delayMs(20); // min 13.5mS
-	
-	uint8_t deviceID;	
-    esp_err_t ret =	i2c_ReadRegister(I2C_MASTER_NUM, TAS5753MD_I2C_ADDR, 0x01, &deviceID);
-	if (ret == ESP_FAIL) {
-		ESP_LOGE(TAG,"i2cread tas5753md failed");
-		}
-	else {
-		ESP_LOGE(TAG,"TAS5753MD DEVICE ID [expected 0x41] = 0x%02X", deviceID); 
-		}
-	return ret;
-	}
-	
 	
 const static char http_html_hdr[] = "HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n";
 const static char http_t[] = "<html><head><title>ESP32 TAS5753MD webradio</title></head><body><h1>ESP32 TAS5753MD webradio</h1><h2>Station list</h2><ul>";
@@ -410,22 +252,6 @@ void i2c_test(int mode){
     SSD1306_UpdateScreen();
 	}
 
-static void i2c_master_init(void){
-    int i2c_master_port = I2C_MASTER_NUM;
-    i2c_config_t conf;
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = I2C_MASTER_SDA_IO;
-    conf.sda_pullup_en = GPIO_PULLUP_DISABLE; // external pullups
-    conf.scl_io_num = I2C_MASTER_SCL_IO;
-    conf.scl_pullup_en = GPIO_PULLUP_DISABLE;
-    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
-    i2c_param_config(i2c_master_port, &conf);
-    i2c_driver_install(i2c_master_port, conf.mode,
-                       I2C_MASTER_RX_BUF_DISABLE,
-                       I2C_MASTER_TX_BUF_DISABLE, 0);
-	}
-
-
 
 
 //////////////////////////////////////////////////////////////////
@@ -471,8 +297,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 
-static void initialise_wifi(EventGroupHandle_t wifi_event_group)
-{
+static void initialise_wifi(EventGroupHandle_t wifi_event_group){
     tcpip_adapter_init();
     ESP_ERROR_CHECK( esp_event_loop_init(event_handler, wifi_event_group) );
 
@@ -482,11 +307,10 @@ static void initialise_wifi(EventGroupHandle_t wifi_event_group)
     ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_FLASH) );
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK( esp_wifi_start() );
-}
+	}
 
 
-static void set_wifi_credentials()
-{
+static void set_wifi_credentials(void){
     wifi_config_t current_config;
     esp_wifi_get_config(WIFI_IF_STA, &current_config);
 
@@ -512,7 +336,7 @@ static void set_wifi_credentials()
     esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     ESP_LOGI(TAG, "connecting");
     esp_wifi_connect();
-}
+	}
 
 
 static void start_wifi(void) {
@@ -582,7 +406,8 @@ static renderer_config_t *create_renderer_config(void){
     renderer_config_t *renderer_config = calloc(1, sizeof(renderer_config_t));
 
 //    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_16BIT;
-    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT; // HN (forces BCK = 64*fs required for TAS5753MD)
+	// force BCK = 64*fs required for TAS5753MD so it can work with MCLK = BCK)
+    renderer_config->bit_depth = I2S_BITS_PER_SAMPLE_32BIT; 
 	
     renderer_config->i2s_num = I2S_NUM_0;
     renderer_config->sample_rate = 44100;
@@ -723,16 +548,34 @@ static void http_server(void *pvParameters){
    netconn_delete(conn);
 }
 
+
+static void i2c_master_init(void){
+    int i2c_master_port = I2C_MASTER_NUM;
+    i2c_config_t conf;
+    conf.mode = I2C_MODE_MASTER;
+    conf.sda_io_num = I2C_MASTER_SDA_IO;
+    conf.sda_pullup_en = GPIO_PULLUP_DISABLE; // external pullup
+    conf.scl_io_num = I2C_MASTER_SCL_IO;
+    conf.scl_pullup_en = GPIO_PULLUP_DISABLE; // external pullup
+    conf.master.clk_speed = I2C_MASTER_FREQ_HZ;
+    i2c_param_config(i2c_master_port, &conf);
+    i2c_driver_install(i2c_master_port, conf.mode,
+                       I2C_MASTER_RX_BUF_DISABLE,
+                       I2C_MASTER_TX_BUF_DISABLE, 0);
+	}
+
+
+
 static void init_hardware(){
     nvs_flash_init();
     i2c_master_init();
-	if (reset_tas5753() == ESP_FAIL) {
-		ESP_LOGE(TAG, "cannot initialize TAS5753MD, loop forever");
+	if (tas5753_Reset() == ESP_FAIL) {
+		ESP_LOGE(TAG, "failure resetting TAS5753MD, loop forever");
 		while (1) {
 			delayMs(100);
 			}
 		}
-    config_tas5753();
+    tas5753_Config();
     SSD1306_Init();
     i2c_test(0);
 
@@ -740,7 +583,6 @@ static void init_hardware(){
 		ESP_LOGE(TAG,"SPI RAM fail!");
         while(1);
 		}
-
     ESP_LOGI(TAG, "hardware initialized");
 	}
 

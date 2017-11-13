@@ -16,6 +16,8 @@ static esp_err_t XI2CWrite(i2c_port_t i2c_num, uint8_t i2c_add, uint8_t* data_wr
   return ret;
 }
 
+
+
 static esp_err_t XI2CRead(i2c_port_t i2c_num, uint8_t i2c_add, uint8_t* data_rd, size_t size) {
   if (size == 0) {
       return ESP_OK;

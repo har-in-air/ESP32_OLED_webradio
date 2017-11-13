@@ -1,3 +1,8 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+
 #include "ssd1306.h"
 
 #define ABS(x)   ((x) > 0 ? (x) : -(x))
@@ -17,6 +22,7 @@ typedef struct {
 static SSD1306_t SSD1306;
 
 uint8_t SSD1306_Init(void) {
+	printf("ssd1306_Init ... ");
 	/* Init LCD */
 	SSD1306_WRITECOMMAND(0xAE); //display off
 	SSD1306_WRITECOMMAND(0x20); //Set Memory Addressing Mode
@@ -59,6 +65,7 @@ uint8_t SSD1306_Init(void) {
 
 	/* Initialized OK */
 	SSD1306.Initialized = 1;
+	printf("done\r\n");
 
 	/* Return OK */
 	return 1;

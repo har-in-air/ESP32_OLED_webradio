@@ -1,5 +1,5 @@
-#ifndef I2C_H_
-#define I2C_H_
+#ifndef XI2C_H_
+#define XI2C_H_
 
 #include "driver/i2c.h"
 #include "stdio.h"
@@ -31,5 +31,6 @@ esp_err_t X_RdBits(i2c_port_t i2c_num, uint8_t i2c_add, uint8_t index, uint8_t b
 esp_err_t X_RdWord(i2c_port_t i2c_num, uint8_t i2c_add, uint8_t index, uint16_t *data_rd);
 esp_err_t X_RdDWord(i2c_port_t i2c_num, uint8_t i2c_add, uint8_t index, uint32_t *data_rd);
 esp_err_t X_PollingDelay(void);
+
 
 #endif /* I2C_H_ */
